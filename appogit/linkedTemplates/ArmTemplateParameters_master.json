@@ -5,6 +5,12 @@
 		"factoryName": {
 			"value": "appogit"
 		},
+		"ls_dev_accountKey": {
+			"value": ""
+		},
+		"ls_dev_properties_typeProperties_url": {
+			"value": "https://adlsapdev.dfs.core.windows.net/"
+		},
 		"containerUri": {
 			"value": ""
 		},

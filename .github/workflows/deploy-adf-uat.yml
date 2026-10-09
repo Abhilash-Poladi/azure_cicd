@@ -1,0 +1,42 @@
+name: Deploy ADF to UAT
+
+on:
+  push:
+    branches:
+      - uat
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: adf-uat-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: uat
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy ADF ARM template to UAT
+        env:
+          UAT_ADLS_ACCOUNT_KEY: ${{ secrets.UAT_ADLS_ACCOUNT_KEY }}
+        run: |
+          az deployment group create \
+            --name "adf-uat-${GITHUB_RUN_NUMBER}" \
+            --resource-group "${{ vars.UAT_RESOURCE_GROUP }}" \
+            --template-file ARMTemplateForFactory.json \
+            --parameters @ARMTemplateParametersForFactory.uat.json \
+            --parameters adls_ls_accountKey="$UAT_ADLS_ACCOUNT_KEY"

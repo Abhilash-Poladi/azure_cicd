@@ -7,11 +7,11 @@
 			"metadata": "Data Factory name",
 			"defaultValue": "appogit"
 		},
-		"ls_dev_accountKey": {
+		"adls_ls_accountKey": {
 			"type": "secureString",
-			"metadata": "Secure string for 'accountKey' of 'ls_dev'"
+			"metadata": "Secure string for 'accountKey' of 'adls_ls'"
 		},
-		"ls_dev_properties_typeProperties_url": {
+		"adls_ls_properties_typeProperties_url": {
 			"type": "string",
 			"defaultValue": "https://adlsapdev.dfs.core.windows.net/"
 		},
@@ -42,11 +42,11 @@
 					"factoryName": {
 						"value": "[parameters('factoryName')]"
 					},
-					"ls_dev_accountKey": {
-						"value": "[parameters('ls_dev_accountKey')]"
+					"adls_ls_accountKey": {
+						"value": "[parameters('adls_ls_accountKey')]"
 					},
-					"ls_dev_properties_typeProperties_url": {
-						"value": "[parameters('ls_dev_properties_typeProperties_url')]"
+					"adls_ls_properties_typeProperties_url": {
+						"value": "[parameters('adls_ls_properties_typeProperties_url')]"
 					}
 				}
 			},

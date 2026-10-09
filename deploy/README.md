@@ -1,10 +1,15 @@
 # Azure Data Factory deployment
 
-The workflow at `.github/workflows/deploy-adf.yml` deploys the inline
+The workflow at `.github/workflows/deploy-adf.yml` responds automatically to
+pushes to `adf_publish`, `uat`, and `prod`. It deploys the inline
 `appogit/ARMTemplateForFactory.json` from an exact commit in `adf_publish`.
 The generated template contains the pipeline, dataset, and linked service in a
 single file, so this workflow does not need to upload or publish linked
 templates.
+
+The workflow and its parameter files are checked out from `main`; that branch
+contains deployment configuration only, not the ADF ARM template. The artifact
+is always checked out separately from `adf_publish`.
 
 ## Configure environments
 
@@ -35,24 +40,22 @@ Do not put keys, passwords, or tokens in these files. The target Data Factory
 must already exist because the generated template deploys factory child
 resources, not the factory itself.
 
-For UAT and PROD, configure GitHub Environment required reviewers so the
-environment approval gates deployment. Restrict each environment's allowed
-deployment branches as appropriate for your repository.
+Configure GitHub Environment required reviewers for `uat` and `prod` if you
+want approvals before those automated deployments proceed. Restrict each
+environment's allowed deployment branches as appropriate for your repository.
 
-## Promote a published version
+## Automatic deployment flow
 
-1. Dispatch **Deploy Azure Data Factory** with target `dev` and the full
-   40-character SHA of a commit in `adf_publish`.
-2. Validate the deployment in DEV.
-3. Dispatch the workflow again with the **same SHA** and target `uat` or `prod`.
-   Set **confirm_dev_validation** only after completing those DEV checks. The
-   workflow requires both that confirmation and a latest successful DEV
-   deployment record for the exact SHA; UAT/PROD Environment reviewers provide
-   the approval gate.
+1. Publishing/merging generated ARM templates to `adf_publish` automatically
+   deploys that exact `adf_publish` commit to DEV.
+2. Pushing/merging to `uat` promotes the latest successful DEV deployment's
+   exact artifact SHA to UAT.
+3. Pushing/merging to `prod` promotes the latest successful UAT deployment's
+   exact artifact SHA to PROD.
 
-The workflow verifies the selected commit is still in `adf_publish` history
-and checks out that commit, rather than resolving the latest branch head at
-deployment time. It is intentionally manual: merging the collaboration,
-`uat`, or `main` branches does not select or deploy an artifact automatically.
-Run the workflow from the protected default branch; the target GitHub
-Environment, not the workflow-source branch, selects the Azure destination.
+Each promotion refuses to proceed unless the latest deployment in the previous
+environment succeeded. It verifies the selected commit is still in
+`adf_publish` history and checks out that exact commit, rather than resolving
+the latest branch head at deployment time. Merge to `uat` after the desired
+artifact has completed its DEV deployment; merge to `prod` after the UAT
+deployment of that artifact succeeds.

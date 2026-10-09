@@ -1,25 +1,11 @@
 name: Deploy Azure Data Factory
 
 on:
-  workflow_dispatch:
-    inputs:
-      target_environment:
-        description: Environment to deploy to
-        required: true
-        type: choice
-        options:
-          - dev
-          - uat
-          - prod
-      publish_commit:
-        description: Full 40-character commit SHA from adf_publish
-        required: true
-        type: string
-      confirm_dev_validation:
-        description: For UAT/PROD, confirm this commit was validated in DEV
-        required: true
-        default: false
-        type: boolean
+  push:
+    branches:
+      - adf_publish
+      - uat
+      - prod
 
 permissions:
   contents: read
@@ -27,39 +13,86 @@ permissions:
   id-token: write
 
 concurrency:
-  group: adf-deploy-${{ inputs.target_environment }}
+  group: adf-deploy-${{ github.ref_name }}
   cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: ${{ inputs.target_environment }}
+    environment: ${{ github.ref_name == 'adf_publish' && 'dev' || github.ref_name }}
     steps:
-      - name: Check out workflow source
+      - name: Check out deployment configuration
         uses: actions/checkout@v4
         with:
+          ref: main
+          path: config
           fetch-depth: 0
+
+      - name: Select the published template commit
+        id: artifact
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const branch = context.ref.replace("refs/heads/", "");
+            let artifactSha;
+
+            if (branch === "adf_publish") {
+              artifactSha = context.sha;
+              core.info(`Deploying the adf_publish commit that triggered this run: ${artifactSha}`);
+            } else {
+              const sourceEnvironment = branch === "uat" ? "dev" : "uat";
+              const deployments = await github.paginate(github.rest.repos.listDeployments, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                environment: sourceEnvironment,
+                per_page: 100
+              });
+
+              if (deployments.length === 0) {
+                core.setFailed(`No ${sourceEnvironment.toUpperCase()} deployment is available to promote.`);
+                return;
+              }
+
+              const latest = deployments[0];
+              const statuses = await github.paginate(github.rest.repos.listDeploymentStatuses, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                deployment_id: latest.id,
+                per_page: 100
+              });
+
+              if (statuses.length === 0 || statuses[0].state !== "success") {
+                core.setFailed(`The latest ${sourceEnvironment.toUpperCase()} deployment did not succeed; refusing to promote a different artifact.`);
+                return;
+              }
+
+              artifactSha = latest.sha;
+              core.info(`Promoting the latest successful ${sourceEnvironment.toUpperCase()} artifact: ${artifactSha}`);
+            }
+
+            core.setOutput("sha", artifactSha);
 
       - name: Validate published commit
         shell: bash
         env:
-          PUBLISH_COMMIT: ${{ inputs.publish_commit }}
+          PUBLISH_COMMIT: ${{ steps.artifact.outputs.sha }}
         run: |
           if [[ ! "$PUBLISH_COMMIT" =~ ^[0-9a-fA-F]{40}$ ]]; then
-            echo "publish_commit must be a full 40-character commit SHA." >&2
+            echo "Selected published artifact is not a full 40-character commit SHA." >&2
             exit 1
           fi
 
-          git fetch --no-tags origin adf_publish
-          if ! git merge-base --is-ancestor "$PUBLISH_COMMIT" FETCH_HEAD; then
-            echo "The supplied commit is not in the current adf_publish history." >&2
+          git -C config fetch --no-tags origin adf_publish
+          git -C config cat-file -e "${PUBLISH_COMMIT}^{commit}"
+          if ! git -C config merge-base --is-ancestor "$PUBLISH_COMMIT" FETCH_HEAD; then
+            echo "The selected commit is not in the current adf_publish history." >&2
             exit 1
           fi
 
       - name: Check out the pinned ADF template
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.publish_commit }}
+          ref: ${{ steps.artifact.outputs.sha }}
           path: published
           sparse-checkout: appogit/ARMTemplateForFactory.json
           sparse-checkout-cone-mode: false
@@ -67,7 +100,7 @@ jobs:
       - name: Validate deployment parameters
         shell: bash
         env:
-          PARAMETER_FILE: deploy/parameters/${{ inputs.target_environment }}.json
+          PARAMETER_FILE: config/deploy/parameters/${{ github.ref_name == 'adf_publish' && 'dev' || github.ref_name }}.json
         run: |
           python - <<'PY'
           import json
@@ -93,55 +126,12 @@ jobs:
               sys.exit(1)
           PY
 
-      - name: Require DEV validation confirmation for promotions
-        if: inputs.target_environment != 'dev'
-        env:
-          CONFIRM_DEV_VALIDATION: ${{ inputs.confirm_dev_validation }}
-        shell: bash
-        run: |
-          if [[ "$CONFIRM_DEV_VALIDATION" != "true" ]]; then
-            echo "Confirm DEV validation of this exact published commit before promoting." >&2
-            exit 1
-          fi
-
-      - name: Require a successful DEV deployment for promotions
-        if: inputs.target_environment != 'dev'
-        uses: actions/github-script@v7
-        env:
-          PUBLISH_COMMIT: ${{ inputs.publish_commit }}
-        with:
-          script: |
-            const deployments = await github.paginate(github.rest.repos.listDeployments, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              environment: "dev",
-              sha: process.env.PUBLISH_COMMIT.toLowerCase(),
-              per_page: 100
-            });
-
-            if (deployments.length === 0) {
-              core.setFailed(`No DEV deployment was recorded for ${process.env.PUBLISH_COMMIT}. Deploy and validate this exact adf_publish commit in DEV first.`);
-              return;
-            }
-
-            const statuses = await github.paginate(github.rest.repos.listDeploymentStatuses, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              deployment_id: deployments[0].id,
-              per_page: 100
-            });
-            if (statuses[0]?.state !== "success") {
-              core.setFailed(`The latest DEV deployment for ${process.env.PUBLISH_COMMIT} did not succeed. Deploy and validate this exact adf_publish commit in DEV first.`);
-              return;
-            }
-            core.info(`Latest DEV deployment ${deployments[0].id} succeeded for ${process.env.PUBLISH_COMMIT}.`);
-
       - name: Record deployment start
         id: deployment
         uses: actions/github-script@v7
         env:
-          TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
-          PUBLISH_COMMIT: ${{ inputs.publish_commit }}
+          TARGET_ENVIRONMENT: ${{ github.ref_name == 'adf_publish' && 'dev' || github.ref_name }}
+          PUBLISH_COMMIT: ${{ steps.artifact.outputs.sha }}
         with:
           script: |
             const environment = process.env.TARGET_ENVIRONMENT;
@@ -177,8 +167,8 @@ jobs:
         id: arm_deploy
         shell: bash
         env:
-          TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
-          PARAMETER_FILE: deploy/parameters/${{ inputs.target_environment }}.json
+          TARGET_ENVIRONMENT: ${{ github.ref_name == 'adf_publish' && 'dev' || github.ref_name }}
+          PARAMETER_FILE: config/deploy/parameters/${{ github.ref_name == 'adf_publish' && 'dev' || github.ref_name }}.json
           RESOURCE_GROUP: ${{ vars.ADF_RESOURCE_GROUP }}
           STORAGE_ACCOUNT_KEY: ${{ secrets.ADF_STORAGE_ACCOUNT_KEY }}
         run: |
@@ -217,7 +207,7 @@ jobs:
         env:
           DEPLOYMENT_ID: ${{ steps.deployment.outputs.id }}
           DEPLOYMENT_STATE: ${{ steps.arm_deploy.outcome }}
-          TARGET_ENVIRONMENT: ${{ inputs.target_environment }}
+          TARGET_ENVIRONMENT: ${{ github.ref_name == 'adf_publish' && 'dev' || github.ref_name }}
         with:
           script: |
             const state = process.env.DEPLOYMENT_STATE === "success" ? "success" : "failure";

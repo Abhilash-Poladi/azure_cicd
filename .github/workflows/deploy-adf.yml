@@ -24,7 +24,6 @@ jobs:
       - name: Check out deployment configuration
         uses: actions/checkout@v4
         with:
-          ref: main
           path: config
           fetch-depth: 0
 

@@ -7,9 +7,10 @@ The generated template contains the pipeline, dataset, and linked service in a
 single file, so this workflow does not need to upload or publish linked
 templates.
 
-The workflow and its parameter files are checked out from `main`; that branch
-contains deployment configuration only, not the ADF ARM template. The artifact
-is always checked out separately from `adf_publish`.
+GitHub loads a push-triggered workflow from the branch receiving the push. For
+that reason, merge this workflow and the `deploy/parameters` files into each
+deployment branch: `adf_publish`, `uat`, and `prod`. They are deployment
+configuration only; no ARM templates need to be merged into `main`.
 
 ## Configure environments
 
@@ -32,13 +33,13 @@ environment with subject
 identity only the permissions needed to deploy the factory resources to that
 environment's resource group.
 
-Edit `deploy/parameters/dev.json`, `uat.json`, and `prod.json` with each
-environment's factory name and ADLS Gen2 URL. The DEV values reflect the
-currently published ADF parameters. UAT and PROD values are intentionally
-marked `REPLACE_WITH_...`; the workflow rejects those markers until replaced.
-Do not put keys, passwords, or tokens in these files. The target Data Factory
-must already exist because the generated template deploys factory child
-resources, not the factory itself.
+Edit `deploy/parameters/dev.json`, `uat.json`, and `prod.json` in the deployment
+configuration change with each environment's factory name and ADLS Gen2 URL.
+The DEV values reflect the currently published ADF parameters. UAT and PROD
+values are intentionally marked `REPLACE_WITH_...`; the workflow rejects
+those markers until replaced. Do not put keys, passwords, or tokens in these
+files. The target Data Factory must already exist because the generated
+template deploys factory child resources, not the factory itself.
 
 Configure GitHub Environment required reviewers for `uat` and `prod` if you
 want approvals before those automated deployments proceed. Restrict each
@@ -55,8 +56,9 @@ environment's allowed deployment branches as appropriate for your repository.
    `adf_publish` artifact commit from the merge ancestry and deploys it to PROD.
 
 Each promotion refuses to proceed unless that exact artifact has a successful
-deployment record in the previous environment. Merge to `uat` after the
-artifact's DEV deployment succeeds, then merge to `prod` after the same
-artifact's UAT deployment succeeds. The workflow verifies the selected commit
-is still in `adf_publish` history and checks out that exact commit, rather
-than resolving the latest branch head at deployment time.
+deployment record in the previous environment. Merge the desired published
+artifact into `uat` after its DEV deployment succeeds, then merge the promoted
+`uat` branch into `prod` after the same artifact's UAT deployment succeeds.
+The workflow resolves the `adf_publish` ancestor of the merge and checks out
+that exact commit, rather than resolving the latest branch head at deployment
+time.

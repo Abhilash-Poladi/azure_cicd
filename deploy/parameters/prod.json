@@ -1,0 +1,12 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "factoryName": {
+      "value": "REPLACE_WITH_PROD_FACTORY_NAME"
+    },
+    "ls_dev_properties_typeProperties_url": {
+      "value": "REPLACE_WITH_PROD_ADLS_URL"
+    }
+  }
+}

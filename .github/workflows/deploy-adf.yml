@@ -28,49 +28,33 @@ jobs:
           path: config
           fetch-depth: 0
 
-      - name: Select the published template commit
+      - name: Resolve the published template commit
         id: artifact
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const branch = context.ref.replace("refs/heads/", "");
-            let artifactSha;
+        shell: bash
+        env:
+          SOURCE_BRANCH: ${{ github.ref_name }}
+          EVENT_SHA: ${{ github.sha }}
+        run: |
+          if [[ "$SOURCE_BRANCH" == "adf_publish" ]]; then
+            ARTIFACT_SHA="$EVENT_SHA"
+          else
+            git -C config fetch --no-tags origin \
+              "+refs/heads/adf_publish:refs/remotes/origin/adf_publish" \
+              "+refs/heads/${SOURCE_BRANCH}:refs/remotes/origin/${SOURCE_BRANCH}"
+            ARTIFACT_SHA="$(git -C config merge-base "$EVENT_SHA" origin/adf_publish)"
+            if [[ -z "$ARTIFACT_SHA" ]]; then
+              echo "The pushed $SOURCE_BRANCH commit does not include an adf_publish artifact commit." >&2
+              exit 1
+            fi
+          fi
 
-            if (branch === "adf_publish") {
-              artifactSha = context.sha;
-              core.info(`Deploying the adf_publish commit that triggered this run: ${artifactSha}`);
-            } else {
-              const sourceEnvironment = branch === "uat" ? "dev" : "uat";
-              const deployments = await github.paginate(github.rest.repos.listDeployments, {
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                environment: sourceEnvironment,
-                per_page: 100
-              });
+          if ! git -C config cat-file -e "${ARTIFACT_SHA}:appogit/ARMTemplateForFactory.json"; then
+            echo "The selected commit does not contain the generated ADF ARM template." >&2
+            exit 1
+          fi
 
-              if (deployments.length === 0) {
-                core.setFailed(`No ${sourceEnvironment.toUpperCase()} deployment is available to promote.`);
-                return;
-              }
-
-              const latest = deployments[0];
-              const statuses = await github.paginate(github.rest.repos.listDeploymentStatuses, {
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                deployment_id: latest.id,
-                per_page: 100
-              });
-
-              if (statuses.length === 0 || statuses[0].state !== "success") {
-                core.setFailed(`The latest ${sourceEnvironment.toUpperCase()} deployment did not succeed; refusing to promote a different artifact.`);
-                return;
-              }
-
-              artifactSha = latest.sha;
-              core.info(`Promoting the latest successful ${sourceEnvironment.toUpperCase()} artifact: ${artifactSha}`);
-            }
-
-            core.setOutput("sha", artifactSha);
+          echo "sha=$ARTIFACT_SHA" >> "$GITHUB_OUTPUT"
+          echo "Pinned published ADF artifact: $ARTIFACT_SHA"
 
       - name: Validate published commit
         shell: bash
@@ -82,12 +66,46 @@ jobs:
             exit 1
           fi
 
-          git -C config fetch --no-tags origin adf_publish
+          git -C config fetch --no-tags origin \
+            "+refs/heads/adf_publish:refs/remotes/origin/adf_publish"
           git -C config cat-file -e "${PUBLISH_COMMIT}^{commit}"
-          if ! git -C config merge-base --is-ancestor "$PUBLISH_COMMIT" FETCH_HEAD; then
+          if ! git -C config merge-base --is-ancestor "$PUBLISH_COMMIT" origin/adf_publish; then
             echo "The selected commit is not in the current adf_publish history." >&2
             exit 1
           fi
+
+      - name: Require the artifact to have succeeded in the previous environment
+        if: github.ref_name != 'adf_publish'
+        uses: actions/github-script@v7
+        env:
+          SOURCE_ENVIRONMENT: ${{ github.ref_name == 'uat' && 'dev' || 'uat' }}
+          PUBLISH_COMMIT: ${{ steps.artifact.outputs.sha }}
+        with:
+          script: |
+            const deployments = await github.paginate(github.rest.repos.listDeployments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              environment: process.env.SOURCE_ENVIRONMENT,
+              sha: process.env.PUBLISH_COMMIT.toLowerCase(),
+              per_page: 100
+            });
+
+            if (deployments.length === 0) {
+              core.setFailed(`Artifact ${process.env.PUBLISH_COMMIT} has no recorded ${process.env.SOURCE_ENVIRONMENT.toUpperCase()} deployment.`);
+              return;
+            }
+
+            const statuses = await github.paginate(github.rest.repos.listDeploymentStatuses, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: deployments[0].id,
+              per_page: 100
+            });
+            if (statuses.length === 0 || statuses[0].state !== "success") {
+              core.setFailed(`Artifact ${process.env.PUBLISH_COMMIT} was not successfully deployed to ${process.env.SOURCE_ENVIRONMENT.toUpperCase()}.`);
+              return;
+            }
+            core.info(`Artifact ${process.env.PUBLISH_COMMIT} was successfully deployed to ${process.env.SOURCE_ENVIRONMENT.toUpperCase()}.`);
 
       - name: Check out the pinned ADF template
         uses: actions/checkout@v4

@@ -48,14 +48,15 @@ environment's allowed deployment branches as appropriate for your repository.
 
 1. Publishing/merging generated ARM templates to `adf_publish` automatically
    deploys that exact `adf_publish` commit to DEV.
-2. Pushing/merging to `uat` promotes the latest successful DEV deployment's
-   exact artifact SHA to UAT.
-3. Pushing/merging to `prod` promotes the latest successful UAT deployment's
-   exact artifact SHA to PROD.
+2. Merge the published artifact branch into `uat`. The workflow finds the
+   `adf_publish` commit in that merge's ancestry and deploys that exact commit
+   to UAT.
+3. Merge the promoted `uat` branch into `prod`. The workflow resolves the same
+   `adf_publish` artifact commit from the merge ancestry and deploys it to PROD.
 
-Each promotion refuses to proceed unless the latest deployment in the previous
-environment succeeded. It verifies the selected commit is still in
-`adf_publish` history and checks out that exact commit, rather than resolving
-the latest branch head at deployment time. Merge to `uat` after the desired
-artifact has completed its DEV deployment; merge to `prod` after the UAT
-deployment of that artifact succeeds.
+Each promotion refuses to proceed unless that exact artifact has a successful
+deployment record in the previous environment. Merge to `uat` after the
+artifact's DEV deployment succeeds, then merge to `prod` after the same
+artifact's UAT deployment succeeds. The workflow verifies the selected commit
+is still in `adf_publish` history and checks out that exact commit, rather
+than resolving the latest branch head at deployment time.
